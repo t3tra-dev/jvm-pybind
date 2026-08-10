@@ -3,7 +3,9 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from jvm.config import Config
+import pytest
+
+from jvm.config import Config, ConfigError
 
 
 class TestConfig:
@@ -44,6 +46,10 @@ maven = ["org.junit:junit:4.13.2"]
 """
         pyproject_path = temp_directory / "pyproject.toml"
         pyproject_path.write_text(pyproject_content)
+        lib_dir = temp_directory / "lib"
+        lib_dir.mkdir()
+        (lib_dir / "test.jar").touch()
+        (lib_dir / "another.jar").touch()
 
         with patch(
             "jvm.config.Config._find_pyproject_toml", return_value=pyproject_path
@@ -51,8 +57,12 @@ maven = ["org.junit:junit:4.13.2"]
             config = Config.from_pyproject()
 
         assert config.java_version == "11"
-        assert config.classpath == ["lib/test.jar", "lib/another.jar"]
+        assert config.classpath == [
+            str((lib_dir / "test.jar").resolve()),
+            str((lib_dir / "another.jar").resolve()),
+        ]
         assert config.deps == {"maven": ["org.junit:junit:4.13.2"]}
+        assert config.project_root == temp_directory.resolve()
 
     def test_from_pyproject_missing_file(self) -> None:
         """Test behavior when pyproject.toml is not found."""
@@ -72,12 +82,8 @@ maven = ["org.junit:junit:4.13.2"]
         with patch(
             "jvm.config.Config._find_pyproject_toml", return_value=pyproject_path
         ):
-            config = Config.from_pyproject()
-
-        # Should return default configuration on parse error
-        assert config.java_version == "17"
-        assert config.deps == {}
-        assert config.classpath == []
+            with pytest.raises(ConfigError, match="Failed to read"):
+                Config.from_pyproject()
 
     def test_from_pyproject_missing_tool_jvm_section(
         self, temp_directory: Path
@@ -131,11 +137,34 @@ classpath = ["custom.jar"]
 """
         pyproject_path = temp_directory / "pyproject.toml"
         pyproject_path.write_text(pyproject_content)
+        custom_jar = temp_directory / "custom.jar"
+        custom_jar.touch()
 
         config = Config.from_pyproject(str(temp_directory))
 
         assert config.java_version == "19"
-        assert config.classpath == ["custom.jar"]
+        assert config.classpath == [str(custom_jar.resolve())]
+
+    @pytest.mark.parametrize(
+        ("classpath_entry", "message"),
+        [
+            ("missing.jar", "Classpath entry does not exist"),
+            ("lib/*.jar", "Classpath pattern matched no files"),
+        ],
+    )
+    def test_from_pyproject_rejects_unresolved_classpath(
+        self,
+        temp_directory: Path,
+        classpath_entry: str,
+        message: str,
+    ) -> None:
+        pyproject_path = temp_directory / "pyproject.toml"
+        pyproject_path.write_text(
+            f'[tool.jvm]\njava-version = "21"\nclasspath = ["{classpath_entry}"]\n'
+        )
+
+        with pytest.raises(ConfigError, match=message):
+            Config.from_pyproject(str(temp_directory))
 
 
 class TestFindPyprojectToml:
@@ -146,8 +175,9 @@ class TestFindPyprojectToml:
         pyproject_path = temp_directory / "pyproject.toml"
         pyproject_path.write_text("[project]\nname = 'test'")
 
-        with patch("pathlib.Path.cwd", return_value=temp_directory):
-            found_path = Config._find_pyproject_toml()
+        with patch("sys.path", [""]):
+            with patch("pathlib.Path.cwd", return_value=temp_directory):
+                found_path = Config._find_pyproject_toml()
 
         assert found_path == pyproject_path
 
@@ -160,15 +190,17 @@ class TestFindPyprojectToml:
         pyproject_path = parent_dir / "pyproject.toml"
         pyproject_path.write_text("[project]\nname = 'test'")
 
-        with patch("pathlib.Path.cwd", return_value=child_dir):
-            found_path = Config._find_pyproject_toml()
+        with patch("sys.path", [""]):
+            with patch("pathlib.Path.cwd", return_value=child_dir):
+                found_path = Config._find_pyproject_toml()
 
         assert found_path == pyproject_path
 
     def test_find_pyproject_toml_not_found(self, temp_directory: Path) -> None:
         """Test behavior when pyproject.toml is not found."""
-        with patch("pathlib.Path.cwd", return_value=temp_directory):
-            found_path = Config._find_pyproject_toml()
+        with patch("sys.path", [""]):
+            with patch("pathlib.Path.cwd", return_value=temp_directory):
+                found_path = Config._find_pyproject_toml()
 
         assert found_path is None
 
@@ -198,10 +230,10 @@ class TestFindPyprojectToml:
 
         assert found_path == pyproject_path
 
-    def test_find_pyproject_toml_entry_directory_priority(
+    def test_find_pyproject_toml_explicit_search_path_priority(
         self, temp_directory: Path
     ) -> None:
-        """Test that entry directory (sys.path[0]) takes priority."""
+        """Test that an explicit search path takes priority over sys.path[0]."""
         # Create two directories with pyproject.toml
         entry_dir = temp_directory / "entry"
         entry_dir.mkdir()
@@ -217,8 +249,7 @@ class TestFindPyprojectToml:
         with patch("sys.path", [str(entry_dir)]):
             found_path = Config._find_pyproject_toml(str(current_dir))
 
-        # Should find entry directory first
-        assert found_path == entry_pyproject
+        assert found_path == current_pyproject
 
     def test_find_pyproject_toml_empty_sys_path(self, temp_directory: Path) -> None:
         """Test behavior when sys.path[0] is empty."""
@@ -251,6 +282,14 @@ gradle = ["implementation 'com.google.guava:guava:31.1-jre'"]
 """
         pyproject_path = temp_directory / "pyproject.toml"
         pyproject_path.write_text(pyproject_content)
+        lib_dir = temp_directory / "lib"
+        lib_dir.mkdir()
+        first_jar = lib_dir / "first.jar"
+        second_jar = lib_dir / "second.jar"
+        first_jar.touch()
+        second_jar.touch()
+        classes_dir = temp_directory / "build" / "classes"
+        classes_dir.mkdir(parents=True)
 
         with patch(
             "jvm.config.Config._find_pyproject_toml", return_value=pyproject_path
@@ -258,7 +297,11 @@ gradle = ["implementation 'com.google.guava:guava:31.1-jre'"]
             config = Config.from_pyproject()
 
         assert config.java_version == "17"
-        assert config.classpath == ["lib/*.jar", "build/classes"]
+        assert config.classpath == [
+            str(first_jar.resolve()),
+            str(second_jar.resolve()),
+            str(classes_dir.resolve()),
+        ]
         assert len(config.deps["maven"]) == 2
         assert "org.apache.commons:commons-lang3:3.12.0" in config.deps["maven"]
         assert "gradle" in config.deps
@@ -277,11 +320,8 @@ deps = {}
         with patch(
             "jvm.config.Config._find_pyproject_toml", return_value=pyproject_path
         ):
-            config = Config.from_pyproject()
-
-        assert config.java_version == ""
-        assert config.classpath == []
-        assert config.deps == {}
+            with pytest.raises(ConfigError, match="non-empty string"):
+                Config.from_pyproject()
 
     def test_config_dataclass_equality(self) -> None:
         """Test Config dataclass equality."""

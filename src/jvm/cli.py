@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import keyword
 import os
 import platform
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +24,27 @@ STUB_PACKAGES = [
 TEMP_STUBS_DIR_NAME = "temp_stubs"
 PACKAGE_STUBS_DIR_NAME = "package_stubs"
 JAVA_PACKAGE_NAME = "java"
+
+
+def parse_stub_packages(value: str) -> list[str]:
+    """Parse a comma-separated list of Python-importable Java packages."""
+    packages: list[str] = []
+    seen: set[str] = set()
+
+    for raw_package in value.split(","):
+        package = raw_package.strip()
+        parts = package.split(".")
+        if not package or any(
+            not part.isidentifier() or keyword.iskeyword(part) for part in parts
+        ):
+            raise argparse.ArgumentTypeError(
+                f"Invalid Java package name: {raw_package!r}"
+            )
+        if package not in seen:
+            seen.add(package)
+            packages.append(package)
+
+    return packages
 
 
 class VirtualEnvironmentDetector:
@@ -82,7 +105,9 @@ class StubFileManager:
 
         raise FileNotFoundError("Could not find package_stubs directory")
 
-    def generate_stubs(self, output_dir: Path) -> None:
+    def generate_stubs(
+        self, output_dir: Path, packages: Optional[list[str]] = None
+    ) -> None:
         """スタブファイル生成"""
         logger.info("Generating fresh stub files...")
 
@@ -90,7 +115,8 @@ class StubFileManager:
         jvm = JVMLoader(config).start()
         generator = PyiStubGenerator(jvm, str(output_dir))
 
-        for package in STUB_PACKAGES:
+        selected_packages = STUB_PACKAGES if packages is None else packages
+        for package in selected_packages:
             self._generate_package_stub(generator, package)
 
     def _generate_package_stub(self, generator: PyiStubGenerator, package: str) -> None:
@@ -134,7 +160,11 @@ class StubInstaller:
         self.venv_detector = VirtualEnvironmentDetector()
         self.file_manager = StubFileManager()
 
-    def install_stubs(self, force_regenerate: bool = False) -> bool:
+    def install_stubs(
+        self,
+        force_regenerate: bool = False,
+        packages: Optional[list[str]] = None,
+    ) -> bool:
         """スタブファイルインストール"""
         site_packages = self.venv_detector.detect_venv()
         if not site_packages:
@@ -143,7 +173,7 @@ class StubInstaller:
 
         logger.info(f"Installing stubs to: {site_packages}")
 
-        stubs_source, temp_dir = self._get_stub_source(force_regenerate)
+        stubs_source, temp_dir = self._get_stub_source(force_regenerate, packages)
         if not stubs_source:
             return False
 
@@ -167,13 +197,15 @@ class StubInstaller:
         )
 
     def _get_stub_source(
-        self, force_regenerate: bool
+        self,
+        force_regenerate: bool,
+        packages: Optional[list[str]] = None,
     ) -> tuple[Optional[Path], Optional[Path]]:
         """スタブソース取得"""
         temp_dir = None
 
-        if force_regenerate:
-            temp_dir = self._create_temp_stubs()
+        if force_regenerate or packages is not None:
+            temp_dir = self._create_temp_stubs(packages)
             return temp_dir, temp_dir
 
         try:
@@ -181,14 +213,15 @@ class StubInstaller:
         except FileNotFoundError as e:
             logger.warning(f"{e}")
             logger.info("Generating fresh stub files...")
-            temp_dir = self._create_temp_stubs()
+            temp_dir = self._create_temp_stubs(packages)
             return temp_dir, temp_dir
 
-    def _create_temp_stubs(self) -> Path:
+    def _create_temp_stubs(self, packages: Optional[list[str]] = None) -> Path:
         """一時スタブディレクトリ作成"""
-        temp_stubs_dir = Path.cwd() / TEMP_STUBS_DIR_NAME
-        temp_stubs_dir.mkdir(exist_ok=True)
-        self.file_manager.generate_stubs(temp_stubs_dir)
+        temp_stubs_dir = Path(
+            tempfile.mkdtemp(prefix=f"{TEMP_STUBS_DIR_NAME}-", dir=Path.cwd())
+        )
+        self.file_manager.generate_stubs(temp_stubs_dir, packages)
         return temp_stubs_dir
 
     def _log_installation_result(self, success: bool) -> None:
@@ -252,7 +285,8 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m jvm --install-stub     Install JDK type stubs to virtual environment
+  python -m jvm --install-stub="java.lang"       Install one package stub
+  python -m jvm --install-stub="java.io,mypkg"  Install multiple package stubs
   python -m jvm --uninstall-stub   Remove JDK type stubs from virtual environment
   python -m jvm --install-pth      Install jvm.pth file to enable automatic JVM import
         """,
@@ -261,8 +295,14 @@ Examples:
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--install-stub",
-        action="store_true",
-        help="Install JDK type stubs to the current virtual environment",
+        nargs="?",
+        const=STUB_PACKAGES,
+        type=parse_stub_packages,
+        metavar="PACKAGES",
+        help=(
+            "Install comma-separated Java package stubs; "
+            "defaults to java.lang,java.util,java.io"
+        ),
     )
     group.add_argument(
         "--uninstall-stub",
@@ -285,8 +325,11 @@ def main() -> int:
     installer = StubInstaller()
 
     try:
-        if args.install_stub:
-            success = installer.install_stubs(force_regenerate=False)
+        if args.install_stub is not None:
+            success = installer.install_stubs(
+                force_regenerate=False,
+                packages=list(args.install_stub),
+            )
         elif args.uninstall_stub:
             success = installer.uninstall_stubs()
         elif args.install_pth:

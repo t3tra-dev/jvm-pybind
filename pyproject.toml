@@ -36,22 +36,21 @@ build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [
-    "black>=25.1.0",
-    "flake8>=7.3.0",
-    "isort>=6.0.1",
     "jvm-pybind",
-    "mypy>=1.16.1",
-    "pyright>=1.1.403",
+    "pyright>=1.1.411",
     "pytest>=8.4.1",
     "pytest-cov>=6.2.1",
     "pytest-mock>=3.14.1",
     "pytest-xdist>=3.8.0",
+    "ruff>=0.16.2",
     "setuptools>=80.9.0",
 ]
 
 [tool.pyright]
-include = ["src/jvm/**/*.py", "examples/**/*.py"]
+include = ["src/jvm/**/*.py", "tests/**/*.py", "examples/**/*.py"]
 exclude = ["**/__pycache__"]
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -82,52 +81,13 @@ minversion = "6.0"
 [tool.uv.sources]
 jvm = { workspace = true }
 
-[tool.black]
+[tool.ruff]
 line-length = 88
-target-version = ['py312']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
+target-version = "py312"
+extend-exclude = ["build", "dist"]
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-line_length = 88
-known_first_party = ["jvm"]
-known_third_party = ["pytest", "setuptools"]
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
 
-[tool.mypy]
-python_version = "3.12"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-exclude = [
-    "examples/*",
-    "setup.py",
-]
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
+[tool.ruff.lint.isort]
+known-first-party = ["jvm"]

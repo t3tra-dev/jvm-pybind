@@ -183,7 +183,6 @@ class TestJVMLoaderStart:
         mock_ctypes_cdll.return_value = mock_lib
 
         with patch("jvm.loader.ctypes.byref"):
-
             with pytest.raises(RuntimeError, match="JVM init failed, code -1"):
                 loader.start()
 
@@ -385,7 +384,6 @@ class TestJVMOptionsGeneration:
         mock_jvm_class.return_value = mock_jvm_instance
 
         with patch("jvm.loader.ctypes.byref"):
-
             result = loader.start()
 
             # Should succeed without options
@@ -421,7 +419,6 @@ class TestJVMOptionsGeneration:
         mock_jvm_class.return_value = mock_jvm_instance
 
         with patch("jvm.loader.ctypes.byref"):
-
             result = loader.start()
 
             # Should include classpath option
@@ -457,7 +454,6 @@ class TestJVMOptionsGeneration:
         mock_jvm_class.return_value = mock_jvm_instance
 
         with patch("jvm.loader.ctypes.byref"):
-
             result = loader.start()
 
             # Should include ARM64 optimizations

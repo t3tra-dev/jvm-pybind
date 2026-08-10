@@ -45,8 +45,14 @@ jvm-pybind provides a CLI for managing Java type stubs in your development envir
 Install type stubs to enable IDE support and autocompletion:
 
 ```bash
-# Install Java type stubs to current virtual environment
+# Install the default java.lang, java.util, and java.io packages
 python -m jvm --install-stub
+
+# Generate and install one selected package
+python -m jvm --install-stub="java.lang"
+
+# Select JDK and custom-JAR packages with a comma-separated list
+python -m jvm --install-stub="java.io,mypkg"
 ```
 
 ### Uninstallation
@@ -73,7 +79,7 @@ This creates a `jvm.pth` file in your virtual environment's `site-packages` dire
 
 **Type Stub Management:**
 
-- **Install stubs**: Automatically detects your virtual environment and installs Java type stubs for better IDE support
+- **Install stubs**: Generates and installs type stubs for comma-separated Java package names
 - **Uninstall stubs**: Cleanly removes all installed Java type stubs
 - **Auto-generation**: Generates fresh stubs from your JVM installation if needed
 - **Virtual environment detection**: Works with venv, virtualenv, conda, and other Python environment managers
@@ -84,11 +90,13 @@ This creates a `jvm.pth` file in your virtual environment's `site-packages` dire
 - **Automatic import**: Enables seamless Java class imports without manual JVM initialization
 - **Virtual environment safety**: Only works within active virtual environments for isolated setup
 
-**Supported Packages:**
+**Default Packages:**
 
 - `java.lang` - Core Java classes (String, System, Object, etc.)
 - `java.util` - Collections and utilities (List, Map, ArrayList, etc.)
 - `java.io` - Input/output classes (File, InputStream, OutputStream, etc.)
+
+Packages from JARs or class directories in `[tool.jvm].classpath` can also be selected, for example with `--install-stub="mypkg"`.
 
 ### Requirements
 
@@ -105,8 +113,8 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 # Install jvm-pybind
 pip install jvm-pybind
 
-# Install type stubs for IDE support
-python -m jvm --install-stub
+# Install JDK and custom-JAR type stubs for IDE support
+python -m jvm --install-stub="java.lang,mypkg"
 
 # OR install PTH file for automatic JVM import
 python -m jvm --install-pth
@@ -124,59 +132,51 @@ python -m jvm --help
 Output:
 
 ```
-usage: jvm [-h] (--install-stub | --uninstall-stub | --install-pth)
+usage: jvm [-h] (--install-stub [PACKAGES] | --uninstall-stub | --install-pth)
 
 JVM-PyBind: Python bindings for JVM with type stub management
 
 options:
   -h, --help         show this help message and exit
-  --install-stub     Install JDK type stubs to the current virtual environment
+  --install-stub [PACKAGES]
+                     Install comma-separated Java package stubs; defaults to
+                     java.lang,java.util,java.io
   --uninstall-stub   Remove JDK type stubs from the current virtual environment
   --install-pth      Install jvm.pth file to enable automatic JVM import in
                      virtual environment
 
 Examples:
-  python -m jvm --install-stub     Install JDK type stubs to virtual environment
+  python -m jvm --install-stub="java.lang"       Install one package stub
+  python -m jvm --install-stub="java.io,mypkg"  Install multiple package stubs
   python -m jvm --uninstall-stub   Remove JDK type stubs from virtual environment
   python -m jvm --install-pth      Install jvm.pth file to enable automatic JVM import
 ```
 
-### Working with Custom Java Classes (Experimental)
-
-> ⚠️ **Note**: Custom Java class access is currently experimental. While JAR files can be included in the classpath during JVM startup, direct access to custom classes through Python import syntax is not yet fully implemented.
-
-**Current Capability:**
+### Working with Custom Java Classes
 
 ```toml
-# pyproject.toml - JAR files are loaded into JVM classpath
+# pyproject.toml
 [tool.jvm]
-java-version = "17"
-classpath = ["hello.jar"]
+java-version = "21"
+classpath = ["./hello.jar"]
 ```
 
-**Planned Feature (Not Yet Available):**
+Relative classpath entries are resolved from the directory containing the declaring `pyproject.toml`. Packages and classes in configured JARs are discovered automatically and can be accessed with normal Python imports.
 
 ```python
-# This will be supported in future versions
-from mypkg import Hello  # Not yet implemented
-message = Hello.greet("World")
+import jvm  # Install the Java import hook
+from mypkg import Hello
+
+print(Hello.greet("World"))
 ```
 
-**Current Workaround:**
-Use the internal API to access custom classes:
+Generate its IDE stub from a directory where the same configuration is discoverable:
 
-```python
-import jvm
-
-# Get JVM instance
-jvm_instance = jvm.JVM.get_instance()
-
-# Find your custom class
-hello_class = jvm_instance.find_class("mypkg/Hello")
-
-# Access methods through low-level API
-# (See Internal API section below)
+```bash
+python -m jvm --install-stub="mypkg"
 ```
+
+Method, field, and constructor signatures are obtained from Java Reflection and JNI after class loading. Overloads, primitive values, object values, and arrays are dispatched according to those reflected signatures.
 
 ## Configuration
 
@@ -495,7 +495,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### High Priority
 
-- [ ] **Custom Java class import support** - Enable `from mypkg import MyClass` syntax for custom classes
+- [x] **Custom Java class import support** - Enable `from mypkg import MyClass` syntax for custom classes
 - [ ] **Enhanced type conversion** - Support for more Java types (arrays, collections, etc.)
 - [ ] **Comprehensive test suite** - Full test coverage for all features
 
@@ -509,4 +509,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [ ] **Callback support** - Enable Java code to call Python functions
 - [ ] **Advanced debugging tools** - Better error messages and debugging capabilities
-- [ ] **IDE integration** - Type hints and autocompletion for Java classes
+- [x] **IDE integration** - Type hints and autocompletion for Java classes

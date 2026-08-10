@@ -2,7 +2,7 @@
 
 import pytest
 
-from jvm.jni import _convert_args_to_jvalue_array
+from jvm.jni import JNIHelper, _convert_args_to_jvalue_array
 from jvm.jvm import JVM
 
 
@@ -24,6 +24,24 @@ class TestJNIHelper:
         assert version > 0
         # Just check it's a reasonable version number
         assert version >= 0x00010001  # At least JNI 1.1
+
+    @pytest.mark.parametrize(
+        ("value", "java_type", "error_type"),
+        [
+            (128, "byte", OverflowError),
+            (2**15, "short", OverflowError),
+            (2**31, "int", OverflowError),
+            (2**63, "long", OverflowError),
+            (1, "boolean", TypeError),
+            (True, "int", TypeError),
+            ("U0001f600", "char", TypeError),
+        ],
+    )
+    def test_primitive_argument_validation(
+        self, value: object, java_type: str, error_type: type[Exception]
+    ) -> None:
+        with pytest.raises(error_type):
+            JNIHelper._validate_primitive_argument(value, java_type)
 
 
 class TestJNIClassOperations:

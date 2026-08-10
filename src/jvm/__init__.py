@@ -1,7 +1,8 @@
 import sys
 
 from . import import_hook, logger, typeconv
-from .config import Config
+from .classpath import ClasspathError, ClasspathIndex
+from .config import Config, ConfigError
 from .jvm import JVM, JavaClass, JavaField, JavaMethod
 from .loader import JVMLoader
 from .stubgen import PyiStubGenerator
@@ -12,6 +13,9 @@ if "jvm.siteinit" not in sys.modules:
 
 __all__ = [
     "Config",
+    "ConfigError",
+    "ClasspathError",
+    "ClasspathIndex",
     "JVM",
     "JavaClass",
     "JavaField",

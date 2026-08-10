@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .jni import JNIHelper
 from .logger import logger
+from .signature import java_type_to_descriptor, method_descriptor
 
 # 定数
 STATIC_MODIFIER = 8
@@ -25,6 +26,8 @@ class JavaMethod:
     parameters: List[str]
     return_type: str
     is_static: bool = False
+    descriptor: Optional[str] = None
+    method_id: Optional[Any] = None
 
     def __repr__(self) -> str:
         params_str = ", ".join(self.parameters) if self.parameters else ""
@@ -39,6 +42,8 @@ class JavaField:
     name: str
     type: str
     is_static: bool = False
+    descriptor: Optional[str] = None
+    field_id: Optional[Any] = None
 
     def __repr__(self) -> str:
         static_str = " (static)" if self.is_static else ""
@@ -52,6 +57,7 @@ class JavaClass:
     name: str
     methods: List[JavaMethod]
     fields: List[JavaField]
+    constructors: List[JavaMethod] = field(default_factory=list)
 
     def __repr__(self) -> str:
         methods_str = f", {len(self.methods)} methods" if self.methods else ""
@@ -62,12 +68,18 @@ class JavaClass:
 class JVM:
     """JVM接続とリソース管理"""
 
-    def __init__(self, jvm_ptr: Any, env_ptr: Any) -> None:
+    def __init__(
+        self,
+        jvm_ptr: Any,
+        env_ptr: Any,
+        classpath: Optional[List[str]] = None,
+    ) -> None:
         self.jvm: Any = jvm_ptr
         self.env: Any = env_ptr
         self.jni: JNIHelper = JNIHelper(env_ptr)
         self._shutdown_complete: bool = False
         self._class_cache: Dict[str, Any] = {}
+        self.classpath = classpath or []
 
     def graceful_shutdown(self) -> None:
         """安全なJVMシャットダウン"""
@@ -337,9 +349,13 @@ class JVM:
     def _extract_method_is_static(self, method_obj: Any) -> bool:
         """Methodオブジェクトから静的メソッドかを判定"""
         try:
-            modifiers = self._call_object_method_with_signature_direct(
-                method_obj, "getModifiers", "()I"
-            )
+            obj_class = self.jni.GetObjectClass(method_obj)
+            if not obj_class:
+                return False
+            method_id = self.jni.GetMethodID(obj_class, "getModifiers", "()I")
+            if not method_id:
+                return False
+            modifiers = self.jni.CallIntMethod(method_obj, method_id)
             if modifiers is not None:
                 # Modifier.STATICのビット演算で確認
                 return bool(modifiers & STATIC_MODIFIER)
@@ -358,11 +374,16 @@ class JVM:
 
             is_static = self._extract_method_is_static(method_obj)
 
+            descriptor = method_descriptor(parameters, return_type)
+            method_id = self.jni.FromReflectedMethod(method_obj)
+
             return JavaMethod(
                 name=name,
                 parameters=parameters,
                 return_type=return_type,
                 is_static=is_static,
+                descriptor=descriptor,
+                method_id=method_id,
             )
         except JNIException:
             return JavaMethod(
@@ -416,9 +437,13 @@ class JVM:
     def _extract_field_is_static(self, field_obj: Any) -> bool:
         """Fieldオブジェクトから静的フィールドかを判定"""
         try:
-            modifiers = self._call_object_method_with_signature_direct(
-                field_obj, "getModifiers", "()I"
-            )
+            obj_class = self.jni.GetObjectClass(field_obj)
+            if not obj_class:
+                return False
+            method_id = self.jni.GetMethodID(obj_class, "getModifiers", "()I")
+            if not method_id:
+                return False
+            modifiers = self.jni.CallIntMethod(field_obj, method_id)
             if modifiers is not None:
                 # Modifier.STATICのビット演算で確認
                 return bool(modifiers & STATIC_MODIFIER)
@@ -434,7 +459,13 @@ class JVM:
             field_type = self._extract_field_type(field_obj)
             is_static = self._extract_field_is_static(field_obj)
 
-            return JavaField(name=name, type=field_type, is_static=is_static)
+            return JavaField(
+                name=name,
+                type=field_type,
+                is_static=is_static,
+                descriptor=java_type_to_descriptor(field_type),
+                field_id=self.jni.FromReflectedField(field_obj),
+            )
         except JNIException:
             return JavaField(name="unknown_field", type="Object", is_static=False)
         except Exception:
@@ -530,6 +561,40 @@ class JVM:
 
         return all_fields
 
+    def _extract_constructors(self, class_obj: Any) -> List[JavaMethod]:
+        """Extract public constructors as method-like metadata."""
+        constructors: List[JavaMethod] = []
+        try:
+            constructor_array = self._call_object_method_with_signature_direct(
+                class_obj,
+                "getConstructors",
+                "()[Ljava/lang/reflect/Constructor;",
+            )
+            if not constructor_array:
+                return constructors
+
+            constructor_count = self._get_array_length(constructor_array)
+            for index in range(constructor_count):
+                constructor_obj = self._get_object_array_element(
+                    constructor_array, index
+                )
+                if not constructor_obj:
+                    continue
+                parameters = self._extract_method_parameters(constructor_obj)
+                constructors.append(
+                    JavaMethod(
+                        name="<init>",
+                        parameters=parameters,
+                        return_type="void",
+                        is_static=False,
+                        descriptor=method_descriptor(parameters, "void"),
+                        method_id=self.jni.FromReflectedMethod(constructor_obj),
+                    )
+                )
+        except Exception:
+            return constructors
+        return constructors
+
     def find_class(self, class_name: str) -> JavaClass:
         """クラス情報を取得 (リフレクション対応)"""
         # クラスを取得 (クラスが存在することを確認)
@@ -538,6 +603,7 @@ class JVM:
         # リフレクションを使用して詳細情報を取得
         methods: List[JavaMethod] = []
         fields: List[JavaField] = []
+        constructors: List[JavaMethod] = []
 
         try:
             # jclass はすでに java.lang.Class のインスタンスなので直接使用
@@ -549,18 +615,38 @@ class JVM:
                 # 完全なフィールド情報の取得 (declared + public継承フィールド)
                 fields = self._extract_all_fields(class_obj)
 
+                constructors = self._extract_constructors(class_obj)
+
         except JNIException:
             # リフレクションに失敗した場合は空
             methods = []
             fields = []
+            constructors = []
 
-        return JavaClass(name=class_name, methods=methods, fields=fields)
+        return JavaClass(
+            name=class_name,
+            methods=methods,
+            fields=fields,
+            constructors=constructors,
+        )
 
     def discover_package_classes(self, package_name: str) -> List[str]:
         """パッケージ内クラスの動的発見 (JNI経由)"""
         discovered_classes: List[str] = []
 
         try:
+            if self.classpath:
+                from .classpath import ClasspathIndex
+
+                index = ClasspathIndex.from_entries(self.classpath)
+                discovered_classes = sorted(
+                    class_name
+                    for class_name in index.classes
+                    if class_name.rpartition(".")[0] == package_name
+                )
+                if discovered_classes:
+                    return discovered_classes
+
             # Class.forName()を使った確実なクラス発見
             discovered_classes = self._discover_classes_via_class_forname(package_name)
 
@@ -882,7 +968,6 @@ class JVM:
                     and "/"  # noqa: W503
                     not in entry_name[len(package_path) + 1 :]  # noqa: W503, E203
                 ):  # サブパッケージ除外
-
                     class_name = entry_name[:-6].replace(
                         "/", "."
                     )  # .class除去、ドット記法変換

@@ -83,7 +83,7 @@ class JVMLoader:
         if rc != 0:
             raise RuntimeError(f"JVM init failed, code {rc}")
 
-        return JVM(p_vm, p_env)
+        return JVM(p_vm, p_env, self.cfg.classpath)
 
     def _find_libjvm(self, version: str) -> str:
         """libjvmライブラリパス検索"""

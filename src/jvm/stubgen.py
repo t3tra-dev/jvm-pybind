@@ -41,6 +41,7 @@ class PyiStubGenerator:
         "java.lang.Double": "float",
         "java.lang.Long": "int",
         "java.lang.Character": "str",
+        "java.lang.Class": "Any",
         "java.lang.StringBuilder": "str",
         "java.lang.StringBuffer": "str",
     }
@@ -486,6 +487,24 @@ class PyiStubGenerator:
                 lines.append(self.generate_field_signature(field, target_package))
             lines.append("")
 
+        if java_class.constructors:
+            constructor_methods = [
+                JavaMethod(
+                    name="__init__",
+                    parameters=constructor.parameters,
+                    return_type="void",
+                    is_static=False,
+                    descriptor=constructor.descriptor,
+                )
+                for constructor in java_class.constructors
+            ]
+            lines.extend(
+                self.generate_deduplicated_method_signatures(
+                    constructor_methods, target_package
+                )
+            )
+            lines.append("")
+
         method_groups = self._group_methods_by_name(java_class.methods)
 
         if method_groups:
@@ -496,7 +515,10 @@ class PyiStubGenerator:
                 lines.extend(method_signatures)
                 lines.append("")
 
-        if not java_class.methods and not java_class.fields:
+        has_members = bool(
+            java_class.methods or java_class.fields or java_class.constructors
+        )
+        if not has_members:
             lines.append("    pass")
 
         return "\n".join(lines)
@@ -604,11 +626,11 @@ class PyiStubGenerator:
 
     def _write_package_stub(self, package_name: str, stub_content: str) -> Path:
         """スタブファイル書き込み"""
-        package_path = package_name.replace(".", "/")
-        target_dir = self.output_dir / package_path.split("/")[0]
+        package_parts = package_name.split(".")
+        target_dir = self.output_dir.joinpath(*package_parts[:-1])
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        stub_file = target_dir / f"{package_path.split('/')[-1]}.pyi"
+        stub_file = target_dir / f"{package_parts[-1]}.pyi"
         stub_file.write_text(stub_content)
 
         print(f"Generated package stub: {stub_file}")

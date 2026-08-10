@@ -8,27 +8,29 @@ from ctypes import (
     POINTER,
     Union,
     c_bool,
-    c_byte,
-    c_char,
     c_char_p,
     c_double,
     c_float,
     c_int,
-    c_long,
-    c_short,
+    c_int8,
+    c_int16,
+    c_int32,
+    c_int64,
+    c_uint16,
     c_void_p,
 )
 from typing import Any, Optional, cast
 
 from .logger import logger
+from .signature import array_component_type, java_type_to_descriptor
 
 # JNI基本型
 jboolean = c_bool
-jbyte = c_byte
-jchar = c_char
-jshort = c_short
-jint = c_int
-jlong = c_long
+jbyte = c_int8
+jchar = c_uint16
+jshort = c_int16
+jint = c_int32
+jlong = c_int64
 jfloat = c_float
 jdouble = c_double
 jobject = c_void_p
@@ -345,8 +347,14 @@ class JNIPrototypes:
     jfieldID = c_void_p
     jthrowable = c_void_p
     jsize = c_int
-    jint = c_int
+    jint = jint
     jboolean = c_bool
+    jbyte = jbyte
+    jchar = jchar
+    jshort = jshort
+    jlong = jlong
+    jfloat = jfloat
+    jdouble = jdouble
 
     GetVersion = ctypes.CFUNCTYPE(jint, JNIEnv)
     DefineClass = ctypes.CFUNCTYPE(
@@ -358,7 +366,7 @@ class JNIPrototypes:
     AllocObject = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass)
     NewObject = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass, jmethodID)
     NewObjectV = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass, jmethodID, ctypes.c_char_p)
-    NewObjectA = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass, jmethodID, POINTER(c_void_p))
+    NewObjectA = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass, jmethodID, POINTER(jvalue))
     GetObjectClass = ctypes.CFUNCTYPE(jclass, JNIEnv, jobject)
     IsInstanceOf = ctypes.CFUNCTYPE(jboolean, JNIEnv, jobject, jclass)
     IsSameObject = ctypes.CFUNCTYPE(jboolean, JNIEnv, jobject, jobject)
@@ -371,7 +379,29 @@ class JNIPrototypes:
         jobject, JNIEnv, jobject, jmethodID, POINTER(jvalue)
     )
     CallBooleanMethod = ctypes.CFUNCTYPE(jboolean, JNIEnv, jobject, jmethodID)
+    CallBooleanMethodA = ctypes.CFUNCTYPE(
+        jboolean, JNIEnv, jobject, jmethodID, POINTER(jvalue)
+    )
+    CallByteMethodA = ctypes.CFUNCTYPE(
+        jbyte, JNIEnv, jobject, jmethodID, POINTER(jvalue)
+    )
+    CallCharMethodA = ctypes.CFUNCTYPE(
+        jchar, JNIEnv, jobject, jmethodID, POINTER(jvalue)
+    )
+    CallShortMethodA = ctypes.CFUNCTYPE(
+        jshort, JNIEnv, jobject, jmethodID, POINTER(jvalue)
+    )
     CallIntMethod = ctypes.CFUNCTYPE(jint, JNIEnv, jobject, jmethodID)
+    CallIntMethodA = ctypes.CFUNCTYPE(jint, JNIEnv, jobject, jmethodID, POINTER(jvalue))
+    CallLongMethodA = ctypes.CFUNCTYPE(
+        jlong, JNIEnv, jobject, jmethodID, POINTER(jvalue)
+    )
+    CallFloatMethodA = ctypes.CFUNCTYPE(
+        jfloat, JNIEnv, jobject, jmethodID, POINTER(jvalue)
+    )
+    CallDoubleMethodA = ctypes.CFUNCTYPE(
+        jdouble, JNIEnv, jobject, jmethodID, POINTER(jvalue)
+    )
     CallVoidMethod = ctypes.CFUNCTYPE(None, JNIEnv, jobject, jmethodID)
     CallVoidMethodA = ctypes.CFUNCTYPE(
         None, JNIEnv, jobject, jmethodID, POINTER(jvalue)
@@ -384,6 +414,30 @@ class JNIPrototypes:
     CallStaticObjectMethodA = ctypes.CFUNCTYPE(
         jobject, JNIEnv, jclass, jmethodID, POINTER(jvalue)
     )
+    CallStaticBooleanMethodA = ctypes.CFUNCTYPE(
+        jboolean, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
+    CallStaticByteMethodA = ctypes.CFUNCTYPE(
+        jbyte, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
+    CallStaticCharMethodA = ctypes.CFUNCTYPE(
+        jchar, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
+    CallStaticShortMethodA = ctypes.CFUNCTYPE(
+        jshort, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
+    CallStaticIntMethodA = ctypes.CFUNCTYPE(
+        jint, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
+    CallStaticLongMethodA = ctypes.CFUNCTYPE(
+        jlong, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
+    CallStaticFloatMethodA = ctypes.CFUNCTYPE(
+        jfloat, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
+    CallStaticDoubleMethodA = ctypes.CFUNCTYPE(
+        jdouble, JNIEnv, jclass, jmethodID, POINTER(jvalue)
+    )
     CallStaticVoidMethod = ctypes.CFUNCTYPE(None, JNIEnv, jclass, jmethodID)
     CallStaticVoidMethodV = ctypes.CFUNCTYPE(
         None, JNIEnv, jclass, jmethodID, ctypes.c_char_p
@@ -393,9 +447,25 @@ class JNIPrototypes:
     )
     GetFieldID = ctypes.CFUNCTYPE(jfieldID, JNIEnv, jclass, c_char_p, c_char_p)
     GetObjectField = ctypes.CFUNCTYPE(jobject, JNIEnv, jobject, jfieldID)
+    GetBooleanField = ctypes.CFUNCTYPE(jboolean, JNIEnv, jobject, jfieldID)
+    GetByteField = ctypes.CFUNCTYPE(jbyte, JNIEnv, jobject, jfieldID)
+    GetCharField = ctypes.CFUNCTYPE(jchar, JNIEnv, jobject, jfieldID)
+    GetShortField = ctypes.CFUNCTYPE(jshort, JNIEnv, jobject, jfieldID)
+    GetIntField = ctypes.CFUNCTYPE(jint, JNIEnv, jobject, jfieldID)
+    GetLongField = ctypes.CFUNCTYPE(jlong, JNIEnv, jobject, jfieldID)
+    GetFloatField = ctypes.CFUNCTYPE(jfloat, JNIEnv, jobject, jfieldID)
+    GetDoubleField = ctypes.CFUNCTYPE(jdouble, JNIEnv, jobject, jfieldID)
     SetObjectField = ctypes.CFUNCTYPE(None, JNIEnv, jobject, jfieldID, jobject)
     GetStaticFieldID = ctypes.CFUNCTYPE(jfieldID, JNIEnv, jclass, c_char_p, c_char_p)
     GetStaticObjectField = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass, jfieldID)
+    GetStaticBooleanField = ctypes.CFUNCTYPE(jboolean, JNIEnv, jclass, jfieldID)
+    GetStaticByteField = ctypes.CFUNCTYPE(jbyte, JNIEnv, jclass, jfieldID)
+    GetStaticCharField = ctypes.CFUNCTYPE(jchar, JNIEnv, jclass, jfieldID)
+    GetStaticShortField = ctypes.CFUNCTYPE(jshort, JNIEnv, jclass, jfieldID)
+    GetStaticIntField = ctypes.CFUNCTYPE(jint, JNIEnv, jclass, jfieldID)
+    GetStaticLongField = ctypes.CFUNCTYPE(jlong, JNIEnv, jclass, jfieldID)
+    GetStaticFloatField = ctypes.CFUNCTYPE(jfloat, JNIEnv, jclass, jfieldID)
+    GetStaticDoubleField = ctypes.CFUNCTYPE(jdouble, JNIEnv, jclass, jfieldID)
     SetStaticObjectField = ctypes.CFUNCTYPE(None, JNIEnv, jclass, jfieldID, jobject)
     NewString = ctypes.CFUNCTYPE(jstring, JNIEnv, POINTER(ctypes.c_uint16), jsize)
     GetStringLength = ctypes.CFUNCTYPE(jsize, JNIEnv, jstring)
@@ -413,6 +483,62 @@ class JNIPrototypes:
     NewObjectArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize, jclass, jobject)
     GetObjectArrayElement = ctypes.CFUNCTYPE(jobject, JNIEnv, jarray, jsize)
     SetObjectArrayElement = ctypes.CFUNCTYPE(None, JNIEnv, jarray, jsize, jobject)
+    NewBooleanArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    NewByteArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    NewCharArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    NewShortArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    NewIntArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    NewLongArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    NewFloatArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    NewDoubleArray = ctypes.CFUNCTYPE(jarray, JNIEnv, jsize)
+    GetBooleanArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jboolean)
+    )
+    GetByteArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jbyte)
+    )
+    GetCharArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jchar)
+    )
+    GetShortArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jshort)
+    )
+    GetIntArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jint)
+    )
+    GetLongArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jlong)
+    )
+    GetFloatArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jfloat)
+    )
+    GetDoubleArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jdouble)
+    )
+    SetBooleanArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jboolean)
+    )
+    SetByteArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jbyte)
+    )
+    SetCharArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jchar)
+    )
+    SetShortArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jshort)
+    )
+    SetIntArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jint)
+    )
+    SetLongArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jlong)
+    )
+    SetFloatArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jfloat)
+    )
+    SetDoubleArrayRegion = ctypes.CFUNCTYPE(
+        None, JNIEnv, jarray, jsize, jsize, POINTER(jdouble)
+    )
     Throw = ctypes.CFUNCTYPE(jint, JNIEnv, jthrowable)
     ThrowNew = ctypes.CFUNCTYPE(jint, JNIEnv, jclass, c_char_p)
     ExceptionOccurred = ctypes.CFUNCTYPE(jthrowable, JNIEnv)
@@ -436,6 +562,224 @@ class JNIPrototypes:
     FromReflectedField = ctypes.CFUNCTYPE(jfieldID, JNIEnv, jobject)
     ToReflectedMethod = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass, jmethodID, jboolean)
     ToReflectedField = ctypes.CFUNCTYPE(jobject, JNIEnv, jclass, jfieldID, jboolean)
+
+
+_JAVA_TYPE_DESCRIPTORS = {
+    "boolean": "Z",
+    "byte": "B",
+    "char": "C",
+    "short": "S",
+    "int": "I",
+    "long": "J",
+    "float": "F",
+    "double": "D",
+}
+_PRIMITIVE_JAVA_TYPES = frozenset(_JAVA_TYPE_DESCRIPTORS)
+
+_INTEGRAL_JAVA_RANGES = {
+    "byte": (-(2**7), 2**7 - 1),
+    "short": (-(2**15), 2**15 - 1),
+    "int": (-(2**31), 2**31 - 1),
+    "long": (-(2**63), 2**63 - 1),
+}
+
+_BOXED_INTEGRAL_JAVA_TYPES = {
+    "java.lang.Byte": "byte",
+    "java.lang.Short": "short",
+    "java.lang.Integer": "int",
+    "java.lang.Long": "long",
+}
+
+_TYPED_INSTANCE_CALLS = {
+    "object": (
+        JNIFunctionIndices.CallObjectMethodA,
+        JNIPrototypes.CallObjectMethodA,
+    ),
+    "boolean": (
+        JNIFunctionIndices.CallBooleanMethodA,
+        JNIPrototypes.CallBooleanMethodA,
+    ),
+    "byte": (JNIFunctionIndices.CallByteMethodA, JNIPrototypes.CallByteMethodA),
+    "char": (JNIFunctionIndices.CallCharMethodA, JNIPrototypes.CallCharMethodA),
+    "short": (JNIFunctionIndices.CallShortMethodA, JNIPrototypes.CallShortMethodA),
+    "int": (JNIFunctionIndices.CallIntMethodA, JNIPrototypes.CallIntMethodA),
+    "long": (JNIFunctionIndices.CallLongMethodA, JNIPrototypes.CallLongMethodA),
+    "float": (JNIFunctionIndices.CallFloatMethodA, JNIPrototypes.CallFloatMethodA),
+    "double": (
+        JNIFunctionIndices.CallDoubleMethodA,
+        JNIPrototypes.CallDoubleMethodA,
+    ),
+    "void": (JNIFunctionIndices.CallVoidMethodA, JNIPrototypes.CallVoidMethodA),
+}
+
+_TYPED_STATIC_CALLS = {
+    "object": (
+        JNIFunctionIndices.CallStaticObjectMethodA,
+        JNIPrototypes.CallStaticObjectMethodA,
+    ),
+    "boolean": (
+        JNIFunctionIndices.CallStaticBooleanMethodA,
+        JNIPrototypes.CallStaticBooleanMethodA,
+    ),
+    "byte": (
+        JNIFunctionIndices.CallStaticByteMethodA,
+        JNIPrototypes.CallStaticByteMethodA,
+    ),
+    "char": (
+        JNIFunctionIndices.CallStaticCharMethodA,
+        JNIPrototypes.CallStaticCharMethodA,
+    ),
+    "short": (
+        JNIFunctionIndices.CallStaticShortMethodA,
+        JNIPrototypes.CallStaticShortMethodA,
+    ),
+    "int": (
+        JNIFunctionIndices.CallStaticIntMethodA,
+        JNIPrototypes.CallStaticIntMethodA,
+    ),
+    "long": (
+        JNIFunctionIndices.CallStaticLongMethodA,
+        JNIPrototypes.CallStaticLongMethodA,
+    ),
+    "float": (
+        JNIFunctionIndices.CallStaticFloatMethodA,
+        JNIPrototypes.CallStaticFloatMethodA,
+    ),
+    "double": (
+        JNIFunctionIndices.CallStaticDoubleMethodA,
+        JNIPrototypes.CallStaticDoubleMethodA,
+    ),
+    "void": (
+        JNIFunctionIndices.CallStaticVoidMethodA,
+        JNIPrototypes.CallStaticVoidMethodA,
+    ),
+}
+
+_TYPED_INSTANCE_FIELD_GETTERS = {
+    "object": (JNIFunctionIndices.GetObjectField, JNIPrototypes.GetObjectField),
+    "boolean": (JNIFunctionIndices.GetBooleanField, JNIPrototypes.GetBooleanField),
+    "byte": (JNIFunctionIndices.GetByteField, JNIPrototypes.GetByteField),
+    "char": (JNIFunctionIndices.GetCharField, JNIPrototypes.GetCharField),
+    "short": (JNIFunctionIndices.GetShortField, JNIPrototypes.GetShortField),
+    "int": (JNIFunctionIndices.GetIntField, JNIPrototypes.GetIntField),
+    "long": (JNIFunctionIndices.GetLongField, JNIPrototypes.GetLongField),
+    "float": (JNIFunctionIndices.GetFloatField, JNIPrototypes.GetFloatField),
+    "double": (JNIFunctionIndices.GetDoubleField, JNIPrototypes.GetDoubleField),
+}
+
+_TYPED_STATIC_FIELD_GETTERS = {
+    "object": (
+        JNIFunctionIndices.GetStaticObjectField,
+        JNIPrototypes.GetStaticObjectField,
+    ),
+    "boolean": (
+        JNIFunctionIndices.GetStaticBooleanField,
+        JNIPrototypes.GetStaticBooleanField,
+    ),
+    "byte": (
+        JNIFunctionIndices.GetStaticByteField,
+        JNIPrototypes.GetStaticByteField,
+    ),
+    "char": (
+        JNIFunctionIndices.GetStaticCharField,
+        JNIPrototypes.GetStaticCharField,
+    ),
+    "short": (
+        JNIFunctionIndices.GetStaticShortField,
+        JNIPrototypes.GetStaticShortField,
+    ),
+    "int": (
+        JNIFunctionIndices.GetStaticIntField,
+        JNIPrototypes.GetStaticIntField,
+    ),
+    "long": (
+        JNIFunctionIndices.GetStaticLongField,
+        JNIPrototypes.GetStaticLongField,
+    ),
+    "float": (
+        JNIFunctionIndices.GetStaticFloatField,
+        JNIPrototypes.GetStaticFloatField,
+    ),
+    "double": (
+        JNIFunctionIndices.GetStaticDoubleField,
+        JNIPrototypes.GetStaticDoubleField,
+    ),
+}
+
+_PRIMITIVE_ARRAY_OPERATIONS: dict[str, tuple[Any, int, Any, int, Any, int, Any]] = {
+    "boolean": (
+        jboolean,
+        JNIFunctionIndices.NewBooleanArray,
+        JNIPrototypes.NewBooleanArray,
+        JNIFunctionIndices.GetBooleanArrayRegion,
+        JNIPrototypes.GetBooleanArrayRegion,
+        JNIFunctionIndices.SetBooleanArrayRegion,
+        JNIPrototypes.SetBooleanArrayRegion,
+    ),
+    "byte": (
+        jbyte,
+        JNIFunctionIndices.NewByteArray,
+        JNIPrototypes.NewByteArray,
+        JNIFunctionIndices.GetByteArrayRegion,
+        JNIPrototypes.GetByteArrayRegion,
+        JNIFunctionIndices.SetByteArrayRegion,
+        JNIPrototypes.SetByteArrayRegion,
+    ),
+    "char": (
+        jchar,
+        JNIFunctionIndices.NewCharArray,
+        JNIPrototypes.NewCharArray,
+        JNIFunctionIndices.GetCharArrayRegion,
+        JNIPrototypes.GetCharArrayRegion,
+        JNIFunctionIndices.SetCharArrayRegion,
+        JNIPrototypes.SetCharArrayRegion,
+    ),
+    "short": (
+        jshort,
+        JNIFunctionIndices.NewShortArray,
+        JNIPrototypes.NewShortArray,
+        JNIFunctionIndices.GetShortArrayRegion,
+        JNIPrototypes.GetShortArrayRegion,
+        JNIFunctionIndices.SetShortArrayRegion,
+        JNIPrototypes.SetShortArrayRegion,
+    ),
+    "int": (
+        jint,
+        JNIFunctionIndices.NewIntArray,
+        JNIPrototypes.NewIntArray,
+        JNIFunctionIndices.GetIntArrayRegion,
+        JNIPrototypes.GetIntArrayRegion,
+        JNIFunctionIndices.SetIntArrayRegion,
+        JNIPrototypes.SetIntArrayRegion,
+    ),
+    "long": (
+        jlong,
+        JNIFunctionIndices.NewLongArray,
+        JNIPrototypes.NewLongArray,
+        JNIFunctionIndices.GetLongArrayRegion,
+        JNIPrototypes.GetLongArrayRegion,
+        JNIFunctionIndices.SetLongArrayRegion,
+        JNIPrototypes.SetLongArrayRegion,
+    ),
+    "float": (
+        jfloat,
+        JNIFunctionIndices.NewFloatArray,
+        JNIPrototypes.NewFloatArray,
+        JNIFunctionIndices.GetFloatArrayRegion,
+        JNIPrototypes.GetFloatArrayRegion,
+        JNIFunctionIndices.SetFloatArrayRegion,
+        JNIPrototypes.SetFloatArrayRegion,
+    ),
+    "double": (
+        jdouble,
+        JNIFunctionIndices.NewDoubleArray,
+        JNIPrototypes.NewDoubleArray,
+        JNIFunctionIndices.GetDoubleArrayRegion,
+        JNIPrototypes.GetDoubleArrayRegion,
+        JNIFunctionIndices.SetDoubleArrayRegion,
+        JNIPrototypes.SetDoubleArrayRegion,
+    ),
+}
 
 
 class JNIHelper:
@@ -495,6 +839,43 @@ class JNIHelper:
     def NewObject(self, clazz: Any, method_id: Any, *args: Any) -> Optional[Any]:
         func = self._get_function(JNIFunctionIndices.NewObject, JNIPrototypes.NewObject)
         return func(self.env, clazz, method_id, *args)
+
+    def NewTypedObject(
+        self,
+        clazz: Any,
+        method_id: Any,
+        parameter_types: list[str],
+        *args: Any,
+    ) -> Optional[Any]:
+        """Construct an object using reflected constructor parameter types."""
+        if len(parameter_types) != len(args):
+            raise TypeError(
+                f"Expected {len(parameter_types)} constructor arguments, got {len(args)}"
+            )
+        if not clazz or not method_id:
+            raise ValueError("clazz and method_id must not be NULL")
+
+        frame_capacity = max(16, len(args) * 3 + 4)
+        if self.PushLocalFrame(frame_capacity) != 0:
+            raise RuntimeError("Failed to push local frame")
+
+        result: Any = None
+        try:
+            jvalue_array = self._convert_typed_args_to_jvalue_array(
+                args, parameter_types
+            )
+            args_ptr = (
+                ctypes.cast(jvalue_array, POINTER(jvalue)) if jvalue_array else None
+            )
+            func = self._get_function(
+                JNIFunctionIndices.NewObjectA, JNIPrototypes.NewObjectA
+            )
+            result = func(self.env, clazz, method_id, args_ptr)
+            self._check_exception()
+        finally:
+            result = self.PopLocalFrame(result)
+
+        return result
 
     def GetObjectClass(self, obj: Any) -> Optional[Any]:
         if not obj:
@@ -598,10 +979,14 @@ class JNIHelper:
 
     def GetStaticMethodID(self, clazz: Any, name: str, signature: str) -> Optional[Any]:
         """Get static method ID"""
+        if not clazz:
+            raise ValueError("clazz must not be NULL")
         func = self._get_function(
             JNIFunctionIndices.GetStaticMethodID, JNIPrototypes.GetStaticMethodID
         )
-        return func(self.env, clazz, name.encode("utf-8"), signature.encode("utf-8"))
+        result = func(self.env, clazz, name.encode("utf-8"), signature.encode("utf-8"))
+        self._check_exception()
+        return result
 
     def CallStaticObjectMethodA(
         self, clazz: Any, method_id: Any, args: Any
@@ -699,13 +1084,229 @@ class JNIHelper:
         func(self.env, clazz, method_id, args_ptr)
         self._check_exception()
 
+    def CallTypedMethod(
+        self,
+        obj: Any,
+        method_id: Any,
+        return_type: str,
+        parameter_types: list[str],
+        *args: Any,
+    ) -> Any:
+        """Call an instance method using its reflected parameter and return types."""
+        return self._call_typed_method(
+            False,
+            obj,
+            method_id,
+            return_type,
+            parameter_types,
+            args,
+        )
+
+    def CallTypedStaticMethod(
+        self,
+        clazz: Any,
+        method_id: Any,
+        return_type: str,
+        parameter_types: list[str],
+        *args: Any,
+    ) -> Any:
+        """Call a static method using its reflected parameter and return types."""
+        return self._call_typed_method(
+            True,
+            clazz,
+            method_id,
+            return_type,
+            parameter_types,
+            args,
+        )
+
+    def _call_typed_method(
+        self,
+        is_static: bool,
+        target: Any,
+        method_id: Any,
+        return_type: str,
+        parameter_types: list[str],
+        args: tuple[Any, ...],
+    ) -> Any:
+        if len(parameter_types) != len(args):
+            raise TypeError(
+                f"Expected {len(parameter_types)} JNI arguments, got {len(args)}"
+            )
+        if not target or not method_id:
+            raise ValueError("target and method_id must not be NULL")
+
+        frame_capacity = max(16, len(args) * 3 + 4)
+        if self.PushLocalFrame(frame_capacity) != 0:
+            raise RuntimeError("Failed to push local frame")
+
+        result: Any = None
+        retained_result: Any = None
+        is_reference_result = (
+            return_type not in _PRIMITIVE_JAVA_TYPES and return_type != "void"
+        )
+        try:
+            jvalue_array = self._convert_typed_args_to_jvalue_array(
+                args, parameter_types
+            )
+            args_ptr = (
+                ctypes.cast(jvalue_array, POINTER(jvalue)) if jvalue_array else None
+            )
+            index, prototype = self._typed_call_spec(is_static, return_type)
+            func = self._get_function(index, prototype)
+            result = func(self.env, target, method_id, args_ptr)
+            self._check_exception()
+        finally:
+            retained_result = self.PopLocalFrame(
+                result if is_reference_result else None
+            )
+
+        return retained_result if is_reference_result else result
+
+    def _convert_typed_args_to_jvalue_array(
+        self, args: tuple[Any, ...], parameter_types: list[str]
+    ) -> Any:
+        if not args:
+            return None
+
+        values = (jvalue * len(args))()
+        for index, (argument, parameter_type) in enumerate(zip(args, parameter_types)):
+            ctypes.memset(ctypes.byref(values[index]), 0, ctypes.sizeof(jvalue))
+            if parameter_type in _PRIMITIVE_JAVA_TYPES:
+                self._validate_primitive_argument(argument, parameter_type)
+            if parameter_type == "boolean":
+                values[index].z = jboolean(argument)
+            elif parameter_type == "byte":
+                values[index].b = jbyte(argument)
+            elif parameter_type == "char":
+                char_value = ord(argument) if isinstance(argument, str) else argument
+                values[index].c = jchar(char_value)
+            elif parameter_type == "short":
+                values[index].s = jshort(argument)
+            elif parameter_type == "int":
+                values[index].i = jint(argument)
+            elif parameter_type == "long":
+                values[index].j = jlong(argument)
+            elif parameter_type == "float":
+                values[index].f = jfloat(argument)
+            elif parameter_type == "double":
+                values[index].d = jdouble(argument)
+            else:
+                values[index].l = self._prepare_reference_argument(
+                    argument, parameter_type
+                )
+        return values
+
+    @staticmethod
+    def _validate_primitive_argument(argument: Any, parameter_type: str) -> None:
+        if argument is None:
+            raise TypeError(f"None is not valid for primitive {parameter_type}")
+        if parameter_type == "boolean":
+            if not isinstance(argument, bool):
+                raise TypeError("Java boolean arguments require a Python bool")
+            return
+        if parameter_type in _INTEGRAL_JAVA_RANGES:
+            if isinstance(argument, bool) or not isinstance(argument, int):
+                raise TypeError(f"Java {parameter_type} arguments require a Python int")
+            lower, upper = _INTEGRAL_JAVA_RANGES[parameter_type]
+            if not lower <= argument <= upper:
+                raise OverflowError(
+                    f"{argument} is outside the Java {parameter_type} range"
+                )
+            return
+        if parameter_type == "char":
+            if not isinstance(argument, str) or len(argument) != 1:
+                raise TypeError("Java char arguments require one UTF-16 code unit")
+            if ord(argument) > 0xFFFF:
+                raise TypeError("Java char arguments require one UTF-16 code unit")
+            return
+        if isinstance(argument, bool) or not isinstance(argument, (int, float)):
+            raise TypeError(
+                f"Java {parameter_type} arguments require a Python int or float"
+            )
+
+    def _prepare_reference_argument(self, argument: Any, parameter_type: str) -> Any:
+        if argument is None:
+            return jobject(0)
+        if hasattr(argument, "_jobject"):
+            return argument._jobject
+        if isinstance(argument, str):
+            if parameter_type == "java.lang.Character":
+                self._validate_primitive_argument(argument, "char")
+                return self._box_primitive("java.lang.Character", "char", argument)
+            result = self.NewStringUTF(argument)
+            if not result:
+                raise RuntimeError("Failed to create Java string argument")
+            return result
+        if isinstance(argument, bool):
+            return self._box_primitive("java.lang.Boolean", "boolean", argument)
+        if isinstance(argument, int):
+            primitive = _BOXED_INTEGRAL_JAVA_TYPES.get(parameter_type)
+            if primitive is None:
+                primitive = "int" if -(2**31) <= argument <= 2**31 - 1 else "long"
+            self._validate_primitive_argument(argument, primitive)
+            wrapper = f"java.lang.{primitive.title()}"
+            if primitive == "int":
+                wrapper = "java.lang.Integer"
+            return self._box_primitive(wrapper, primitive, argument)
+        if isinstance(argument, float):
+            primitive = "float" if parameter_type == "java.lang.Float" else "double"
+            wrapper = f"java.lang.{primitive.title()}"
+            return self._box_primitive(wrapper, primitive, argument)
+        if isinstance(argument, (list, tuple)):
+            return self.NewTypedArray(parameter_type, argument)
+        if isinstance(argument, c_void_p):
+            return argument
+        if hasattr(argument, "value"):
+            return argument
+        raise TypeError(
+            f"Cannot convert {type(argument).__name__} to Java {parameter_type}"
+        )
+
+    def _box_primitive(self, wrapper_type: str, primitive_type: str, value: Any) -> Any:
+        wrapper_class = self.FindClass(wrapper_type.replace(".", "/"))
+        if not wrapper_class:
+            raise RuntimeError(f"Could not find {wrapper_type}")
+        signature = (
+            f"({_JAVA_TYPE_DESCRIPTORS[primitive_type]})"
+            f"L{wrapper_type.replace('.', '/')};"
+        )
+        method_id = self.GetStaticMethodID(wrapper_class, "valueOf", signature)
+        if not method_id:
+            raise RuntimeError(f"Could not find {wrapper_type}.valueOf")
+        return self.CallTypedStaticMethod(
+            wrapper_class,
+            method_id,
+            wrapper_type,
+            [primitive_type],
+            value,
+        )
+
+    @staticmethod
+    def _typed_call_spec(is_static: bool, return_type: str) -> tuple[int, Any]:
+        kind = (
+            return_type
+            if return_type in _PRIMITIVE_JAVA_TYPES or return_type == "void"
+            else "object"
+        )
+        try:
+            return (
+                _TYPED_STATIC_CALLS[kind] if is_static else _TYPED_INSTANCE_CALLS[kind]
+            )
+        except KeyError as exc:
+            raise TypeError(f"Unsupported Java return type: {return_type}") from exc
+
     # Field Operations
     def GetFieldID(self, clazz: Any, name: str, signature: str) -> Optional[Any]:
         """Get field ID"""
+        if not clazz:
+            raise ValueError("clazz must not be NULL")
         func = self._get_function(
             JNIFunctionIndices.GetFieldID, JNIPrototypes.GetFieldID
         )
-        return func(self.env, clazz, name.encode("utf-8"), signature.encode("utf-8"))
+        result = func(self.env, clazz, name.encode("utf-8"), signature.encode("utf-8"))
+        self._check_exception()
+        return result
 
     def GetObjectField(self, obj: Any, field_id: Any) -> Optional[Any]:
         """Get object field"""
@@ -713,6 +1314,29 @@ class JNIHelper:
             JNIFunctionIndices.GetObjectField, JNIPrototypes.GetObjectField
         )
         return func(self.env, obj, field_id)
+
+    def GetTypedField(self, obj: Any, field_id: Any, field_type: str) -> Any:
+        """Read an instance field using its reflected type."""
+        return self._get_typed_field(False, obj, field_id, field_type)
+
+    def GetTypedStaticField(self, clazz: Any, field_id: Any, field_type: str) -> Any:
+        """Read a static field using its reflected type."""
+        return self._get_typed_field(True, clazz, field_id, field_type)
+
+    def _get_typed_field(
+        self, is_static: bool, target: Any, field_id: Any, field_type: str
+    ) -> Any:
+        if not target or not field_id:
+            raise ValueError("target and field_id must not be NULL")
+        kind = field_type if field_type in _PRIMITIVE_JAVA_TYPES else "object"
+        getter_map = (
+            _TYPED_STATIC_FIELD_GETTERS if is_static else _TYPED_INSTANCE_FIELD_GETTERS
+        )
+        index, prototype = getter_map[kind]
+        func = self._get_function(index, prototype)
+        result = func(self.env, target, field_id)
+        self._check_exception()
+        return result
 
     def SetObjectField(self, obj: Any, field_id: Any, value: Any) -> None:
         """Set object field"""
@@ -861,6 +1485,92 @@ class JNIHelper:
         )
         func(self.env, array, index, value)
 
+    def NewTypedArray(self, java_type: str, values: list[Any] | tuple[Any, ...]) -> Any:
+        """Create a one- or multi-dimensional Java array from Python values."""
+        descriptor = java_type_to_descriptor(java_type)
+        if not descriptor.startswith("["):
+            raise TypeError(f"Not a Java array type: {java_type}")
+
+        component_type = array_component_type(descriptor)
+        if component_type in _PRIMITIVE_JAVA_TYPES:
+            return self._new_primitive_array(component_type, values)
+
+        component_descriptor = descriptor[1:]
+        if component_descriptor.startswith("["):
+            element_class_name = component_descriptor
+        else:
+            element_class_name = component_descriptor[1:-1]
+        element_class = self.FindClass(element_class_name)
+        if not element_class:
+            raise RuntimeError(f"Could not find array element class {component_type}")
+
+        result = self.NewObjectArray(len(values), element_class, None)
+        if not result:
+            raise RuntimeError(f"Failed to allocate Java array {descriptor}")
+        for index, value in enumerate(values):
+            if component_descriptor.startswith("["):
+                converted = self.NewTypedArray(component_descriptor, value)
+            else:
+                converted = self._prepare_reference_argument(value, component_type)
+            self.SetObjectArrayElement(result, index, converted)
+        self._check_exception()
+        return result
+
+    def _new_primitive_array(
+        self, primitive_type: str, values: list[Any] | tuple[Any, ...]
+    ) -> Any:
+        for value in values:
+            self._validate_primitive_argument(value, primitive_type)
+
+        (
+            ctype,
+            new_index,
+            new_prototype,
+            _,
+            _,
+            set_index,
+            set_prototype,
+        ) = _PRIMITIVE_ARRAY_OPERATIONS[primitive_type]
+        new_func = self._get_function(new_index, new_prototype)
+        result = new_func(self.env, len(values))
+        if not result:
+            self._check_exception()
+            raise RuntimeError(f"Failed to allocate Java {primitive_type} array")
+
+        converted_values = [
+            ord(value) if primitive_type == "char" and isinstance(value, str) else value
+            for value in values
+        ]
+        buffer = (ctype * len(converted_values))(*converted_values)
+        set_func = self._get_function(set_index, set_prototype)
+        set_func(self.env, result, 0, len(converted_values), buffer)
+        self._check_exception()
+        return result
+
+    def GetTypedArrayElements(self, array: Any, java_type: str) -> list[Any]:
+        """Read Java array elements, leaving object conversion to the caller."""
+        if not array:
+            return []
+        component_type = array_component_type(java_type)
+        length = self.GetArrayLength(array)
+        if component_type not in _PRIMITIVE_JAVA_TYPES:
+            return [self.GetObjectArrayElement(array, index) for index in range(length)]
+
+        (
+            ctype,
+            _,
+            _,
+            get_index,
+            get_prototype,
+            _,
+            _,
+        ) = _PRIMITIVE_ARRAY_OPERATIONS[component_type]
+        buffer = (ctype * length)()
+        get_func = self._get_function(get_index, get_prototype)
+        get_func(self.env, array, 0, length, buffer)
+        self._check_exception()
+        return list(buffer)
+
     # Exception Operations
     def Throw(self, throwable: Any) -> int:
         """Throw exception"""
@@ -999,14 +1709,18 @@ class JNIHelper:
         func = self._get_function(
             JNIFunctionIndices.FromReflectedMethod, JNIPrototypes.FromReflectedMethod
         )
-        return func(self.env, method)
+        result = func(self.env, method)
+        self._check_exception()
+        return result
 
     def FromReflectedField(self, field: Any) -> Optional[Any]:
         """Convert reflected field to field ID"""
         func = self._get_function(
             JNIFunctionIndices.FromReflectedField, JNIPrototypes.FromReflectedField
         )
-        return func(self.env, field)
+        result = func(self.env, field)
+        self._check_exception()
+        return result
 
     def ToReflectedMethod(
         self, clazz: Any, method_id: Any, is_static: bool

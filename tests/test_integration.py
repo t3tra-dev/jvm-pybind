@@ -198,6 +198,50 @@ class TestProxySystemIntegration:
         current_time_method = system_proxy.currentTimeMillis
         assert hasattr(current_time_method, "__call__")
 
+    def test_typed_static_primitive_call(self, jvm_instance: JVM) -> None:
+        math_proxy = ClassProxy(jvm_instance, "java.lang.Math")
+
+        assert math_proxy.abs(-42) == 42
+
+    def test_all_typed_primitive_call_kinds(self, jvm_instance: JVM) -> None:
+        assert (
+            ClassProxy(jvm_instance, "java.lang.Boolean").logicalAnd(True, False)
+            is False
+        )
+        assert ClassProxy(jvm_instance, "java.lang.Byte").parseByte("127") == 127
+        assert ClassProxy(jvm_instance, "java.lang.Character").toUpperCase("a") == "A"
+        assert ClassProxy(jvm_instance, "java.lang.Short").parseShort("1234") == 1234
+        assert ClassProxy(jvm_instance, "java.lang.Long").sum(20, 22) == 42
+        assert ClassProxy(jvm_instance, "java.lang.Float").sum(
+            1.25, 2.5
+        ) == pytest.approx(3.75)
+        assert ClassProxy(jvm_instance, "java.lang.Double").sum(
+            1.25, 2.5
+        ) == pytest.approx(3.75)
+        assert ClassProxy(jvm_instance, "java.lang.System").gc() is None
+
+    def test_typed_static_primitive_fields(self, jvm_instance: JVM) -> None:
+        assert ClassProxy(jvm_instance, "java.lang.Integer").MAX_VALUE == 2**31 - 1
+        assert ClassProxy(jvm_instance, "java.lang.Long").MAX_VALUE == 2**63 - 1
+        assert ClassProxy(jvm_instance, "java.lang.Character").MAX_VALUE == "\uffff"
+        assert ClassProxy(jvm_instance, "java.lang.Math").PI == pytest.approx(
+            3.141592653589793
+        )
+
+    def test_constructor_and_typed_instance_calls(self, jvm_instance: JVM) -> None:
+        builder_proxy = ClassProxy(jvm_instance, "java.lang.StringBuilder")
+
+        builder = builder_proxy("Hello")
+
+        assert builder.length() == 5
+        assert builder.append("!").toString() == "Hello!"
+
+    def test_primitive_array_argument_and_return(self, jvm_instance: JVM) -> None:
+        arrays_proxy = ClassProxy(jvm_instance, "java.util.Arrays")
+
+        assert arrays_proxy.toString([1, 2, 3]) == "[1, 2, 3]"
+        assert arrays_proxy.copyOf([1, 2, 3], 5) == [1, 2, 3, 0, 0]
+
 
 @pytest.mark.integration
 class TestImportHookIntegration:
@@ -385,6 +429,6 @@ class TestPerformance:
 
         # Should complete within reasonable time
         elapsed = end_time - start_time
-        assert (
-            elapsed < 10.0
-        ), f"Package discovery took {elapsed:.2f}s, expected < 10.0s"
+        assert elapsed < 10.0, (
+            f"Package discovery took {elapsed:.2f}s, expected < 10.0s"
+        )

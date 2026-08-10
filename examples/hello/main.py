@@ -1,5 +1,3 @@
-from java.lang import System  # type: ignore
+from mypkg import Hello  # pyright: ignore[reportMissingModuleSource]
 
-System.out.println("Hello from JVM!")
-
-print("✅ JVM-PyBind example completed successfully!")
+print(Hello.greet("World"))

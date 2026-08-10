@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from jvm.classpath import ClasspathIndex
 from jvm.import_hook.finder import JavaFinder
 from jvm.import_hook.loader import JavaLoader
 from jvm.proxy import ClassProxy, PackageProxy
@@ -100,6 +101,44 @@ class TestJavaFinder:
 
         assert spec is None
 
+    def test_find_spec_custom_java_package(self) -> None:
+        finder = JavaFinder()
+        finder._classpath_index = ClasspathIndex(
+            classes=frozenset({"mypkg.Hello"}),
+            packages=frozenset({"mypkg"}),
+        )
+
+        with (
+            patch.object(finder, "_get_jvm", return_value=Mock()) as get_jvm,
+            patch("jvm.import_hook.finder.PathFinder.find_spec", return_value=None),
+        ):
+            spec = finder.find_spec("mypkg", None)
+
+        assert spec is not None
+        assert isinstance(spec.loader, JavaLoader)
+        assert spec.loader.classpath_index == finder._classpath_index
+        get_jvm.assert_called_once()
+
+    def test_regular_python_package_wins_over_custom_java_package(self) -> None:
+        finder = JavaFinder()
+        finder._classpath_index = ClasspathIndex(
+            classes=frozenset({"mypkg.Hello"}),
+            packages=frozenset({"mypkg"}),
+        )
+        python_spec = ModuleSpec("mypkg", Mock())
+
+        with (
+            patch.object(finder, "_get_jvm") as get_jvm,
+            patch(
+                "jvm.import_hook.finder.PathFinder.find_spec",
+                return_value=python_spec,
+            ),
+        ):
+            spec = finder.find_spec("mypkg", None)
+
+        assert spec is None
+        get_jvm.assert_not_called()
+
     def test_find_spec_python_package(self) -> None:
         """Test finding spec for Python package returns None."""
         finder = JavaFinder()
@@ -119,15 +158,14 @@ class TestJavaFinder:
     def test_get_jvm_first_call(self) -> None:
         """Test _get_jvm method on first call (initializes JVM)."""
         finder = JavaFinder()
+        mock_config = Mock()
 
         with (
-            patch("jvm.import_hook.finder.Config") as mock_config_class,
+            patch.object(
+                finder, "_get_config", return_value=mock_config
+            ) as mock_get_config,
             patch("jvm.import_hook.finder.JVMLoader") as mock_loader_class,
         ):
-
-            mock_config = Mock()
-            mock_config_class.from_pyproject.return_value = mock_config
-
             mock_loader = Mock()
             mock_jvm = Mock()
             mock_loader.start.return_value = mock_jvm
@@ -137,7 +175,7 @@ class TestJavaFinder:
 
             assert result == mock_jvm
             assert finder._jvm == mock_jvm
-            mock_config_class.from_pyproject.assert_called_once()
+            mock_get_config.assert_called_once()
             mock_loader_class.assert_called_once_with(mock_config)
             mock_loader.start.assert_called_once()
 
@@ -147,44 +185,41 @@ class TestJavaFinder:
         mock_jvm = Mock()
         finder._jvm = mock_jvm  # Pre-populate cache
 
-        with patch("jvm.import_hook.finder.Config") as mock_config_class:
+        with patch.object(finder, "_get_config") as mock_get_config:
             result = finder._get_jvm()
 
             assert result == mock_jvm
-            # Should not call Config.from_pyproject() again
-            mock_config_class.from_pyproject.assert_not_called()
+            mock_get_config.assert_not_called()
 
     def test_get_jvm_thread_safety(self) -> None:
         """Test _get_jvm method thread safety."""
         finder = JavaFinder()
         results = []
+        mock_config = Mock()
+        mock_loader = Mock()
+        mock_jvm = Mock()
+        mock_loader.start.return_value = mock_jvm
 
         def worker() -> None:
-            with (
-                patch("jvm.import_hook.finder.Config") as mock_config_class,
-                patch("jvm.import_hook.finder.JVMLoader") as mock_loader_class,
-            ):
+            result = finder._get_jvm()
+            results.append(result)
 
-                mock_config = Mock()
-                mock_config_class.from_pyproject.return_value = mock_config
-
-                mock_loader = Mock()
-                mock_jvm = Mock()
-                mock_loader.start.return_value = mock_jvm
-                mock_loader_class.return_value = mock_loader
-
-                result = finder._get_jvm()
-                results.append(result)
-
-        # Start multiple threads
-        threads = [threading.Thread(target=worker) for _ in range(5)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
+        with (
+            patch.object(finder, "_get_config", return_value=mock_config),
+            patch(
+                "jvm.import_hook.finder.JVMLoader", return_value=mock_loader
+            ) as mock_loader_class,
+        ):
+            threads = [threading.Thread(target=worker) for _ in range(5)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
 
         # All threads should get the same JVM instance
         assert len(set(id(r) for r in results)) == 1  # All results are the same object
+        mock_loader_class.assert_called_once_with(mock_config)
+        mock_loader.start.assert_called_once()
 
 
 class TestJavaLoader:
@@ -280,6 +315,26 @@ class TestJavaLoader:
         assert result._fqcn == "java.lang.String"
         assert result._jvm == mock_jvm
         mock_jvm.find_class.assert_called_once_with("java/lang/String")
+
+    def test_exec_module_custom_root_resolves_indexed_class(
+        self, mock_jvm: Mock
+    ) -> None:
+        index = ClasspathIndex(
+            classes=frozenset({"mypkg.Hello"}),
+            packages=frozenset({"mypkg"}),
+        )
+        loader = JavaLoader(mock_jvm, "mypkg", index)
+        module = ModuleType("mypkg")
+
+        loader.exec_module(module)
+        result = module.__getattr__("Hello")
+
+        assert isinstance(result, ClassProxy)
+        assert result._fqcn == "mypkg.Hello"
+        mock_jvm.find_class.assert_not_called()
+
+        with pytest.raises(AttributeError, match="Missing"):
+            module.__getattr__("Missing")
 
     def test_exec_module_subpackage_getattr_class_not_found(
         self, mock_jvm: Mock
@@ -377,16 +432,14 @@ class TestImportHookIntegration:
     def test_java_finder_integration(self) -> None:
         """Test JavaFinder integration with JVM initialization."""
         finder = JavaFinder()
+        mock_config = Mock()
 
         with (
-            patch("jvm.import_hook.finder.Config") as mock_config_class,
+            patch.object(
+                finder, "_get_config", return_value=mock_config
+            ) as mock_get_config,
             patch("jvm.import_hook.finder.JVMLoader") as mock_loader_class,
         ):
-
-            # Setup mocks
-            mock_config = Mock()
-            mock_config_class.from_pyproject.return_value = mock_config
-
             mock_loader = Mock()
             mock_jvm = Mock()
             mock_loader.start.return_value = mock_jvm
@@ -400,7 +453,7 @@ class TestImportHookIntegration:
             assert spec.loader.jvm == mock_jvm  # type: ignore
 
             # Verify JVM was initialized
-            mock_config_class.from_pyproject.assert_called_once()
+            mock_get_config.assert_called_once()
             mock_loader_class.assert_called_once_with(mock_config)
             mock_loader.start.assert_called_once()
 
@@ -448,6 +501,7 @@ class TestImportHookEdgeCases:
     def test_java_finder_case_sensitivity(self) -> None:
         """Test that JavaFinder is case-sensitive."""
         finder = JavaFinder()
+        finder._classpath_index = ClasspathIndex.empty()
 
         # Should not match case variations
         spec_upper = finder.find_spec("JAVA.lang", None)

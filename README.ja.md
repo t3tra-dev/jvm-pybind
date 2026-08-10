@@ -45,8 +45,14 @@ jvm-pybind は開発環境での Java 型スタブ管理のための CLI を提�
 IDE サポートと自動補完を有効にするために型スタブをインストール:
 
 ```bash
-# 現在の仮想環境にJava型スタブをインストール
+# 既定の java.lang、java.util、java.io をインストール
 python -m jvm --install-stub
+
+# 指定した1パッケージだけを生成してインストール
+python -m jvm --install-stub="java.lang"
+
+# カンマ区切りでJDKとカスタムJARのパッケージを指定
+python -m jvm --install-stub="java.io,mypkg"
 ```
 
 ### アンインストール
@@ -73,7 +79,7 @@ python -m jvm --install-pth
 
 **型スタブ管理:**
 
-- **スタブインストール**: 仮想環境を自動検出し、IDE 支援向けの Java 型スタブをインストール
+- **スタブインストール**: カンマ区切りで指定した Java パッケージの型スタブを生成してインストール
 - **スタブアンインストール**: インストールされた全ての Java 型スタブをクリーンに削除
 - **自動生成**: 必要に応じて JVM インストールから新しいスタブを生成
 - **仮想環境検出**: venv、virtualenv、conda、その他の Python 環境マネージャーと連携
@@ -84,11 +90,13 @@ python -m jvm --install-pth
 - **自動インポート**: 手動の JVM 初期化なしでシームレスな Java クラスインポートを実現
 - **仮想環境安全性**: アクティブな仮想環境内でのみ動作し、分離されたセットアップを保証
 
-**サポートされるパッケージ:**
+**既定のパッケージ:**
 
 - `java.lang` - Java コアクラス (String、System、Object 等)
 - `java.util` - コレクションとユーティリティ (List、Map、ArrayList 等)
 - `java.io` - 入出力クラス (File、InputStream、OutputStream 等)
+
+`[tool.jvm].classpath` に含まれる JAR または class directory のパッケージも、`--install-stub="mypkg"` のように指定できます。
 
 ### 要件
 
@@ -105,8 +113,8 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 # jvm-pybindのインストール
 pip install jvm
 
-# IDEサポート用の型スタブをインストール
-python -m jvm --install-stub
+# IDEサポート用にJDKとカスタムJARの型スタブをインストール
+python -m jvm --install-stub="java.lang,mypkg"
 
 # または自動JVMインポート用のPTHファイルをインストール
 python -m jvm --install-pth
@@ -124,59 +132,51 @@ python -m jvm --help
 出力:
 
 ```
-usage: jvm [-h] (--install-stub | --uninstall-stub | --install-pth)
+usage: jvm [-h] (--install-stub [PACKAGES] | --uninstall-stub | --install-pth)
 
 JVM-PyBind: Python bindings for JVM with type stub management
 
 options:
   -h, --help         show this help message and exit
-  --install-stub     Install JDK type stubs to the current virtual environment
+  --install-stub [PACKAGES]
+                     Install comma-separated Java package stubs; defaults to
+                     java.lang,java.util,java.io
   --uninstall-stub   Remove JDK type stubs from the current virtual environment
   --install-pth      Install jvm.pth file to enable automatic JVM import in
                      virtual environment
 
 Examples:
-  python -m jvm --install-stub     Install JDK type stubs to virtual environment
+  python -m jvm --install-stub="java.lang"       Install one package stub
+  python -m jvm --install-stub="java.io,mypkg"  Install multiple package stubs
   python -m jvm --uninstall-stub   Remove JDK type stubs from virtual environment
   python -m jvm --install-pth      Install jvm.pth file to enable automatic JVM import
 ```
 
-### カスタム Java クラスの使用 (実験的機能)
-
-> ⚠️ **注意**: カスタム Java クラスへのアクセスは現在実験的な機能です。JVM 起動時に JAR ファイルをクラスパスに含めることはできますが、Python の import 構文を使った直接的なカスタムクラスへのアクセスはまだ完全に実装されていません。
-
-**現在利用可能な機能:**
+### カスタム Java クラスの使用
 
 ```toml
-# pyproject.toml - JARファイルはJVMクラスパスに読み込まれます
+# pyproject.toml
 [tool.jvm]
-java-version = "17"
-classpath = ["hello.jar"]
+java-version = "21"
+classpath = ["./hello.jar"]
 ```
 
-**計画中の機能 (まだ利用できません) :**
+相対クラスパスは、この設定を書いた `pyproject.toml` のディレクトリを基準に解決されます。JAR 内のパッケージとクラスは自動的に検出され、通常の Python import と同じ形で利用できます。
 
 ```python
-# 将来のバージョンでサポート予定
-from mypkg import Hello  # まだ実装されていません
-message = Hello.greet("World")
+import jvm  # Java import hookを有効化
+from mypkg import Hello
+
+print(Hello.greet("World"))
 ```
 
-**現在の回避方法:**
-内部 API を使用してカスタムクラスにアクセス:
+IDE 用スタブは、同じ設定を読み込めるディレクトリから生成します。
 
-```python
-import jvm
-
-# JVMインスタンスを取得
-jvm_instance = jvm.JVM.get_instance()
-
-# カスタムクラスを検索
-hello_class = jvm_instance.find_class("mypkg/Hello")
-
-# 低レベルAPIを通じてメソッドにアクセス
-#  (詳細は以下の内部APIセクションを参照)
+```bash
+python -m jvm --install-stub="mypkg"
 ```
+
+メソッド、フィールド、コンストラクタの署名は、クラスロード後に Java Reflection と JNI から取得されます。オーバーロード、primitive 型、オブジェクト型、配列型を署名に基づいて呼び分けます。
 
 ## 設定
 
@@ -495,7 +495,7 @@ from java.lang import System  # デバッグ出力を表示
 
 ### 高優先度
 
-- [ ] **カスタム Java クラスのインポートサポート** - カスタムクラスに対する`from mypkg import MyClass`構文の実現
+- [x] **カスタム Java クラスのインポートサポート** - カスタムクラスに対する`from mypkg import MyClass`構文の実現
 - [ ] **強化された型変換** - より多くの Java 型 (配列、コレクション等) のサポート
 - [ ] **包括的なテストスイート** - 全機能の完全なテストカバレッジ
 
@@ -509,7 +509,7 @@ from java.lang import System  # デバッグ出力を表示
 
 - [ ] **コールバックサポート** - Java コードから Python 関数の呼び出しを可能に
 - [ ] **高度なデバッグツール** - より良いエラーメッセージとデバッグ機能
-- [ ] **IDE 統合** - Java クラスの型ヒントと自動補完
+- [x] **IDE 統合** - Java クラスの型ヒントと自動補完
 
 ## 技術詳細
 

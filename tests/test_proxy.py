@@ -11,6 +11,7 @@ from jvm.proxy import (
     MethodProxy,
     ObjectProxy,
     PackageProxy,
+    _argument_score,
     _build_sig,
     _java_type_to_sig,
 )
@@ -37,6 +38,11 @@ class TestHelperFunctions:
         assert _java_type_to_sig("java.lang.Object") == "Ljava/lang/Object;"
         assert _java_type_to_sig("java.util.List") == "Ljava/util/List;"
         assert _java_type_to_sig("com.example.MyClass") == "Lcom/example/MyClass;"
+
+    def test_java_type_to_sig_arrays(self) -> None:
+        assert _java_type_to_sig("int[]") == "[I"
+        assert _java_type_to_sig("java.lang.String[]") == "[Ljava/lang/String;"
+        assert _java_type_to_sig("[[Ljava.lang.String;") == "[[Ljava/lang/String;"
 
     def test_build_sig_no_params_void_return(self) -> None:
         """Test building signature for method with no params and void return."""
@@ -73,6 +79,33 @@ class TestHelperFunctions:
         result = _build_sig(method)
 
         assert result == "(Ljava/lang/String;ZLjava/util/List;)Ljava/lang/String;"
+
+    @pytest.mark.parametrize(
+        ("java_type", "value", "matches"),
+        [
+            ("byte", 127, True),
+            ("byte", 128, False),
+            ("short", -(2**15), True),
+            ("short", -(2**15) - 1, False),
+            ("int", 2**31 - 1, True),
+            ("int", 2**31, False),
+            ("long", -(2**63), True),
+            ("long", -(2**63) - 1, False),
+        ],
+    )
+    def test_integral_argument_ranges(
+        self, java_type: str, value: int, matches: bool
+    ) -> None:
+        assert (_argument_score(java_type, value) is not None) is matches
+
+    def test_boxed_integral_overloads_are_scored_by_target_type(self) -> None:
+        assert _argument_score("java.lang.Integer", 42) == 1
+        assert _argument_score("java.lang.Long", 42) == 2
+        assert _argument_score("java.lang.Integer", 2**31) is None
+
+    def test_java_char_rejects_supplementary_code_point(self) -> None:
+        assert _argument_score("char", "A") == 0
+        assert _argument_score("char", "U0001f600") is None
 
 
 class TestPackageProxy:
@@ -195,7 +228,7 @@ class TestClassProxy:
         mock_jvm._find_class.return_value = mock_class_ref
         mock_jvm.find_class.return_value = class_info
         mock_jvm.jni.GetStaticFieldID.return_value = 0x11111111
-        mock_jvm.jni.GetStaticObjectField.return_value = mock_field_value
+        mock_jvm.jni.GetTypedStaticField.return_value = mock_field_value
 
         with patch("jvm.proxy.to_python") as mock_to_python:
             mock_to_python.return_value = "mocked_python_value"
@@ -204,7 +237,9 @@ class TestClassProxy:
 
             assert result == "mocked_python_value"
             mock_jvm.jni.GetStaticFieldID.assert_called_once()
-            mock_jvm.jni.GetStaticObjectField.assert_called_once()
+            mock_jvm.jni.GetTypedStaticField.assert_called_once_with(
+                mock_class_ref, 0x11111111, "java.io.PrintStream"
+            )
 
     def test_class_proxy_getattr_static_method(self, mock_jvm: Mock) -> None:
         """Test accessing static method."""
@@ -419,23 +454,24 @@ class TestMethodProxy:
         mock_result = 0x11111111
 
         mock_jvm.jni.GetStaticMethodID.return_value = mock_method_id
-        mock_jvm.jni.CallStaticObjectMethod.return_value = mock_result
+        mock_jvm.jni.CallTypedStaticMethod.return_value = mock_result
 
-        with (
-            patch("jvm.proxy.to_java") as mock_to_java,
-            patch("jvm.proxy.to_python") as mock_to_python,
-        ):
-
-            mock_to_java.return_value = 42
+        with patch("jvm.proxy.to_python") as mock_to_python:
             mock_to_python.return_value = "42"
 
             result = proxy(42)
 
             assert result == "42"
-            mock_to_java.assert_called_once_with(mock_jvm, 42)
             mock_to_python.assert_called_once_with(mock_jvm, mock_result)
             mock_jvm.jni.GetStaticMethodID.assert_called_once_with(
                 jclass, "valueOf", "(I)Ljava/lang/String;"
+            )
+            mock_jvm.jni.CallTypedStaticMethod.assert_called_once_with(
+                jclass,
+                mock_method_id,
+                "java.lang.String",
+                ["int"],
+                42,
             )
 
     def test_method_proxy_call_no_matching_overload(self, mock_jvm: Mock) -> None:
@@ -452,12 +488,8 @@ class TestMethodProxy:
 
         proxy = MethodProxy(mock_jvm, jclass, overloads)
 
-        with patch("jvm.proxy.to_java") as mock_to_java:
-            mock_to_java.return_value = "string_arg"
-
-            with pytest.raises(StopIteration):
-                # This will fail because we pass 1 string arg but method expects 1 int arg
-                proxy("string_arg")
+        with pytest.raises(TypeError, match="No matching overload"):
+            proxy("string_arg")
 
     def test_method_proxy_call_method_id_failure(self, mock_jvm: Mock) -> None:
         """Test method call when method ID resolution fails."""
@@ -475,11 +507,8 @@ class TestMethodProxy:
 
         mock_jvm.jni.GetStaticMethodID.return_value = None  # Failure
 
-        with patch("jvm.proxy.to_java") as mock_to_java:
-            mock_to_java.return_value = 42
-
-            with pytest.raises(RuntimeError, match="MethodID resolve failed"):
-                proxy(42)
+        with pytest.raises(RuntimeError, match="MethodID resolve failed"):
+            proxy(42)
 
     def test_method_proxy_repr(self, mock_jvm: Mock) -> None:
         """Test MethodProxy string representation."""
@@ -545,13 +574,14 @@ class TestInstanceMethodProxy:
         mock_jvm.jni.GetObjectClass.return_value = mock_obj_class
         mock_jvm.jni.GetMethodID.return_value = mock_method_id
 
-        with patch("jvm.proxy.to_java") as mock_to_java:
-            mock_to_java.return_value = []
+        mock_jvm.jni.CallTypedMethod.return_value = None
 
-            result = proxy()
+        result = proxy()
 
-            assert result is None
-            mock_jvm.jni.CallVoidMethod.assert_called_once_with(jobject, mock_method_id)
+        assert result is None
+        mock_jvm.jni.CallTypedMethod.assert_called_once_with(
+            jobject, mock_method_id, "void", []
+        )
 
     def test_instance_method_proxy_call_object_method(self, mock_jvm: Mock) -> None:
         """Test calling object-returning instance method."""
@@ -573,21 +603,19 @@ class TestInstanceMethodProxy:
 
         mock_jvm.jni.GetObjectClass.return_value = mock_obj_class
         mock_jvm.jni.GetMethodID.return_value = mock_method_id
-        mock_jvm.jni.CallObjectMethod.return_value = mock_result
+        mock_jvm.jni.CallTypedMethod.return_value = mock_result
 
-        with (
-            patch("jvm.proxy.to_java") as mock_to_java,
-            patch("jvm.proxy.to_python") as mock_to_python,
-        ):
-
-            mock_to_java.side_effect = lambda jvm, arg: arg  # Pass through
+        with patch("jvm.proxy.to_python") as mock_to_python:
             mock_to_python.return_value = "string_result"
 
             result = proxy()
 
             assert result == "string_result"
-            mock_jvm.jni.CallObjectMethod.assert_called_once_with(
-                jobject, mock_method_id
+            mock_jvm.jni.CallTypedMethod.assert_called_once_with(
+                jobject,
+                mock_method_id,
+                "java.lang.String",
+                [],
             )
 
     def test_instance_method_proxy_call_with_args(self, mock_jvm: Mock) -> None:
@@ -610,14 +638,18 @@ class TestInstanceMethodProxy:
         mock_jvm.jni.GetObjectClass.return_value = mock_obj_class
         mock_jvm.jni.GetMethodID.return_value = mock_method_id
 
-        with patch("jvm.proxy.to_java") as mock_to_java:
-            mock_to_java.return_value = 0x33333333  # Mock Java string
+        mock_jvm.jni.CallTypedMethod.return_value = None
 
-            result = proxy("test_value")
+        result = proxy("test_value")
 
-            assert result is None
-            mock_to_java.assert_called_once_with(mock_jvm, "test_value")
-            mock_jvm.jni.CallVoidMethod.assert_called_once()
+        assert result is None
+        mock_jvm.jni.CallTypedMethod.assert_called_once_with(
+            jobject,
+            mock_method_id,
+            "void",
+            ["java.lang.String"],
+            "test_value",
+        )
 
     def test_instance_method_proxy_call_no_matching_overload(
         self, mock_jvm: Mock
@@ -635,13 +667,10 @@ class TestInstanceMethodProxy:
 
         proxy = InstanceMethodProxy(mock_jvm, jobject, overloads)
 
-        with patch("jvm.proxy.to_java") as mock_to_java:
-            mock_to_java.side_effect = lambda jvm, arg: arg
-
-            with pytest.raises(
-                RuntimeError, match="No matching method found for 0 arguments"
-            ):
-                proxy()  # Method expects 1 argument, we provide 0
+        with pytest.raises(
+            RuntimeError, match="No matching method found for 0 arguments"
+        ):
+            proxy()  # Method expects 1 argument, we provide 0
 
     def test_instance_method_proxy_call_exception(self, mock_jvm: Mock) -> None:
         """Test instance method call with exception."""
@@ -659,9 +688,8 @@ class TestInstanceMethodProxy:
 
         mock_jvm.jni.GetObjectClass.side_effect = Exception("Test error")
 
-        with patch("jvm.proxy.to_java"):
-            with pytest.raises(RuntimeError, match="Failed to call method toString"):
-                proxy()
+        with pytest.raises(RuntimeError, match="Failed to call method toString"):
+            proxy()
 
     def test_instance_method_proxy_repr(self, mock_jvm: Mock) -> None:
         """Test InstanceMethodProxy string representation."""
