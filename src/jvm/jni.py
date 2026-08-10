@@ -87,9 +87,9 @@ def _convert_args_to_jvalue_array(args: tuple[Any, ...]) -> tuple[Any, int]:
             jvalue_array[i].d = jdouble(arg)
         else:
             if isinstance(arg, int) or hasattr(arg, "value"):
-                jvalue_array[i].l = arg
+                jvalue_array[i].l = arg  # noqa: E741
             else:
-                jvalue_array[i].l = jobject(arg) if arg is not None else jobject(0)
+                jvalue_array[i].l = jobject(arg) if arg is not None else jobject(0)  # noqa: E741
 
     return jvalue_array, len(args)
 
