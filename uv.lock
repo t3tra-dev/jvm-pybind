@@ -77,7 +77,7 @@ wheels = [
 
 [[package]]
 name = "jvm-pybind"
-version = "0.1.0rc3"
+version = "0.1.1"
 source = { editable = "." }
 
 [package.dev-dependencies]
