@@ -91,14 +91,14 @@ class JavaFinder(MetaPathFinder):
                 is_package=True,
             )
 
+        python_spec = PathFinder.find_spec(fullname, path)
+        if python_spec is not None and python_spec.loader is not None:
+            return None
+
         classpath_index = self._get_classpath_index()
         is_custom_package = classpath_index.contains_package(fullname)
 
         if not is_custom_package:
-            return None
-
-        python_spec = PathFinder.find_spec(fullname, path)
-        if python_spec is not None and python_spec.loader is not None:
             return None
 
         jvm = self._get_jvm()
