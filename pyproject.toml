@@ -1,6 +1,6 @@
 [project]
 name = "jvm-pybind"
-version = "0.1.1"
+version = "0.1.2"
 description = "JVM bindings for Python that enable seamless integration between Python and Java code through JNI (Java Native Interface)."
 readme = "README.md"
 authors = [{ name = "t3tra-dev", email = "admin@t3tra.net" }]
